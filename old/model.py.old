@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import torch
+from torch import nn
+from torch.autograd import Variable
+from torchvision import models
+import matplotlib.pyplot as plt
+
+class DFCVAE(nn.Module):
+    def __init__(self, bsz):
+        super(DFCVAE, self).__init__()
+        self.bsz = bsz
+        self.encoder = nn.Sequential(
+                        nn.Conv2d(3, 32, 4, 2, 1),
+                        nn.BatchNorm2d(32),
+                        nn.LeakyReLU(0.2, True),
+                        nn.Conv2d(32, 64, 4, 2, 1),
+                        nn.BatchNorm2d(64),
+                        nn.LeakyReLU(0.2, True),
+                        nn.Conv2d(64, 128, 4, 2, 1),
+                        nn.BatchNorm2d(128),
+                        nn.LeakyReLU(0.2, True),
+                        nn.Conv2d(128, 256, 4, 2, 1),
+                        nn.BatchNorm2d(256),
+                        nn.LeakyReLU(0.2, True))
+        self.fce1 = nn.Linear(4096, 100)
+        self.fce2 = nn.Linear(4096, 100)
+        self.fcd = nn.Linear(100, 4096)
+        self.decoder = nn.Sequential(
+                        nn.ReLU(),
+                        nn.UpsamplingNearest2d(scale_factor=2),
+                        #nn.modules.ReplicationPad2d((1,1,1,1)),
+                        nn.Conv2d(256, 128, 3, padding=1),
+                        nn.BatchNorm2d(128, 1e-3),
+                        nn.LeakyReLU(0.2, True),
+                        nn.UpsamplingNearest2d(scale_factor=2),
+                        #nn.modules.ReplicationPad2d((1,1,1,1)),
+                        nn.Conv2d(128, 64, 3, padding=1),
+                        nn.BatchNorm2d(64, 1e-3),
+                        nn.LeakyReLU(0.2, True),
+                        nn.UpsamplingNearest2d(scale_factor=2),
+                        #nn.modules.ReplicationPad2d((1,1,1,1)),
+                        nn.Conv2d(64, 32, 3, padding=1),
+                        nn.BatchNorm2d(32, 1e-3),
+                        nn.LeakyReLU(0.2, True),
+                        nn.UpsamplingNearest2d(scale_factor=2),
+                        #nn.modules.ReplicationPad2d((1,1,1,1)),
+                        nn.Conv2d(32, 3, 3, padding=1))
+
+    def get_z(self, mu, logvar):
+        std = logvar.mul(0.5).exp_()
+        eps = torch.cuda.FloatTensor(std.size()).normal_()
+        eps = Variable(eps)
+        return eps.mul(std).add_(mu)
+
+    def forward(self, x):
+        h1 = self.encoder(x).view(-1, 4096)
+        mu, logvar = self.fce1(h1), self.fce2(h1)
+        z = self.get_z(mu, logvar)
+        h2 = self.fcd(z)
+        recon = self.decoder(h2.view(x.size(0), 256, 4, 4))
+        return recon, mu, logvar, z
+
+
+
+class VGG19(nn.Module):
+
+    layers = [  'conv1_1', 'relu1_1', 'conv1_2', 'relu1_2', 'pool1',
+                'conv2_1', 'relu2_1', 'conv2_2', 'relu2_2', 'pool2',
+                'conv3_1', 'relu3_1', 'conv3_2', 'relu3_2', 'conv3_3', 'relu3_3', 'conv3_4', 'relu3_4', 'pool3',
+                'conv4_1', 'relu4_1', 'conv4_2', 'relu4_2', 'conv4_3', 'relu4_3', 'conv4_4', 'relu4_4', 'pool4',
+                'conv5_1', 'relu5_1', 'conv5_2', 'relu5_2', 'conv5_3', 'relu5_3', 'conv5_4', 'relu5_4', 'pool5']
+
+    def __init__(self):
+        super(VGG19, self).__init__()
+        om = models.vgg19(pretrained=True).features
+        self.features = nn.Sequential()
+        for i, module in enumerate(om):
+            self.features.add_module(VGG19.layers[i], module)
+
+    def forward(self, x):
+        keep = ['relu3_1', 'relu4_1', 'relu5_1']
+        def gen(i):
+            for name, module in self.features._modules.items():
+                i = module(i)
+                if name in keep:
+                    yield i
+        return list(gen(x))
