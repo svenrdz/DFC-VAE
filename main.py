@@ -41,13 +41,13 @@ parser.add_argument('--ndf', type=int, default=32,
 parser.add_argument('--instance_norm', action='store_true',
                     help='use instance norm layer instead of batch norm')
 parser.add_argument('--content_layers', type=str, nargs='?', default=None,
-                    help='name of the layers to be used to compute the feature perceptual loss')
+                    help='name of the layers to be used to compute the feature perceptual loss, default=[relu3_1, relu4_1, relu5_1]')
 parser.add_argument('--niter', type=int, default=10,
                     help='number of epochs to train for, default=10')
 parser.add_argument('--lr', type=float, default=0.0005,
                     help='learning rate, default=0.0005')
 parser.add_argument('--beta1', type=float, default=0.5,
-                    help='beta1 for adam. default=0.5')
+                    help='beta1 for adam, default=0.5')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--ngpu', type=int, default=1,
                     help='number of GPUs to use')
@@ -57,7 +57,9 @@ parser.add_argument('--decoder', default='',
                     help="path to decoder (to continue training)")
 parser.add_argument('--outf', default='./output',
                     help='folder to output images and model checkpoints')
-parser.add_argument('--manualSeed', type=int, help='manual seed')
+parser.add_argument('--manual_seed', type=int, help='manual seed')
+parser.add_argument('--log_interval', type=int, default=1, help='number of iterations between each stdout logging, default=1')
+parser.add_argument('--img_interval', type=int, default=100, help='number of iterations between each image saving, default=100')
 
 
 args = parser.parse_args()
@@ -68,15 +70,13 @@ try:
 except OSError:
     pass
 
-if args.manualSeed is None:
-    args.manualSeed = random.randint(1, 10000)
-print("Random Seed: ", args.manualSeed)
-random.seed(args.manualSeed)
-torch.manual_seed(args.manualSeed)
+if args.manual_seed is None:
+    args.manual_seed = random.randint(1, 10000)
+print("Random Seed: ", args.manual_seed)
+random.seed(args.manual_seed)
+torch.manual_seed(args.manual_seed)
 if args.cuda:
-    torch.cuda.manual_seed_all(args.manualSeed)
-
-cudnn.benchmark = True
+    torch.cuda.manual_seed_all(args.manual_seed)
 
 if torch.cuda.is_available() and not args.cuda:
     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
@@ -107,10 +107,14 @@ else:
     Normalize = nn.BatchNorm2d
 if args.content_layers is None:
     content_layers = default_content_layers
+else:
+    content_layers = args.content_layers
 
 
-# custom weights initialization called on netG and netD
 def weights_init(m):
+    '''
+    Custom weights initialization called on encoder and decoder.
+    '''
     if isinstance(m, nn.Conv2d):
         init.kaiming_normal(m.weight.data, a=0.01)
         m.bias.data.zero_()
@@ -120,6 +124,11 @@ def weights_init(m):
 
 
 class _VGG(nn.Module):
+    '''
+    Classic pre-trained VGG19 model.
+    Its forward call returns a list of the activations from
+    the predefined content layers.
+    '''
 
     def __init__(self, ngpu):
         super(_VGG, self).__init__()
@@ -152,6 +161,10 @@ print(descriptor)
 
 
 class _Encoder(nn.Module):
+    '''
+    Encoder module, as described in :
+    https://arxiv.org/abs/1610.00291
+    '''
 
     def __init__(self, ngpu):
         super(_Encoder, self).__init__()
@@ -206,11 +219,15 @@ class _Encoder(nn.Module):
 encoder = _Encoder(ngpu)
 encoder.apply(weights_init)
 if args.encoder != '':
-    encoer.load_state_dict(torch.load(args.encoder))
+    encoder.load_state_dict(torch.load(args.encoder))
 print(encoder)
 
 
 class _Decoder(nn.Module):
+    '''
+    Decoder module, as described in :
+    https://arxiv.org/abs/1610.00291
+    '''
 
     def __init__(self, ngpu):
         super(_Decoder, self).__init__()
@@ -311,10 +328,11 @@ for epoch in range(args.niter):
         loss = kld + fpl
         train_loss += loss.data[0]
         optimizer.step()
-        print('[{}/{}][{}/{}] FPL: {:.4f} KLD: {:.4f}'.format(
-              epoch, args.niter, i, len(dataloader),
-              fpl.data[0], kld.data[0]))
-        if i % 100 == 0:
+        if i % args.log_interval == 0:
+            print('[{}/{}][{}/{}] FPL: {:.4f} KLD: {:.4f}'.format(
+            epoch, args.niter, i, len(dataloader),
+                  fpl.data[0], kld.data[0]))
+        if i % args.img_interval == 0:
             vutils.save_image(input.data,
                               '{}/inputs.png'.format(args.outf),
                               normalize=True)
