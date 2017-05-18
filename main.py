@@ -323,5 +323,5 @@ for epoch in range(args.niter):
                               normalize=True)
 
     # do checkpointing
-    torch.save(encoder.state_dict(), '{}/encoder_epoch_{}.pth' % (args.outf, epoch))
-    torch.save(decoder.state_dict(), '{}/decoder_epoch_{}.pth' % (args.outf, epoch))
+    torch.save(encoder.state_dict(), '{}/encoder_epoch_{}.pth'.format(args.outf, epoch))
+    torch.save(decoder.state_dict(), '{}/decoder_epoch_{}.pth'.format(args.outf, epoch))
