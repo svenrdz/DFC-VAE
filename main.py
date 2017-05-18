@@ -100,6 +100,7 @@ nz = int(args.nz)
 nef = int(args.nef)
 ndf = int(args.ndf)
 nc = 3
+out_size = args.image_size // 16
 if args.instance_norm:
     Normalize = nn.InstanceNorm2d
 else:
@@ -172,8 +173,8 @@ class _Encoder(nn.Module):
             nn.LeakyReLU(0.2, True),
             Normalize(nef * 8)
         )
-        self.mean = nn.Linear(nef * 8 * 4 * 4, nz)
-        self.logvar = nn.Linear(nef * 8 * 4 * 4, nz)
+        self.mean = nn.Linear(nef * 8 * out_size * out_size, nz)
+        self.logvar = nn.Linear(nef * 8 * out_size * out_size, nz)
 
     def sampler(self, mean, logvar):
         std = logvar.mul(0.5).exp_()
@@ -215,7 +216,7 @@ class _Decoder(nn.Module):
         super(_Decoder, self).__init__()
         self.ngpu = ngpu
         self.decoder_dense = nn.Sequential(
-            nn.Linear(nz, ndf * 8 * 4 * 4),
+            nn.Linear(nz, ndf * 8 * out_size * out_size),
             nn.ReLU(True)
         )
         self.decoder_conv = nn.Sequential(
@@ -243,12 +244,12 @@ class _Decoder(nn.Module):
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
             hidden = nn.parallel.data_parallel(
                 self.decoder_dense, input, range(self.ngpu))
-            hidden = hidden.view(batch_size, ndf * 8, 4, 4)
+            hidden = hidden.view(batch_size, ndf * 8, out_size, out_size)
             output = nn.parallel.data_parallel(
                 self.decoder_conv, input, range(self.ngpu))
         else:
             hidden = self.decoder_dense(input).view(
-                batch_size, ndf * 8, 4, 4)
+                batch_size, ndf * 8, out_size, out_size)
             output = self.decoder_conv(hidden)
         return output
 
